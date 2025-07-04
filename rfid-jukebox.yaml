@@ -1,0 +1,391 @@
+# Copyright © 2025 bitsandpixels.io
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# The RFID Jukebox: ESPHome configuration file.
+# https://bitsandpixels.io/posts/rfid-jukebox-story/
+
+substitutions:
+  name: "jukebox"
+  friendly_name: "RFID Jukebox"
+  wifi_ap_password: ""
+  led_count: "28"
+
+esphome:
+  name: "${name}"
+  project:
+    name: "bitsandpixels.rfid-jukebox"
+    version: "1.0.1_t-embed"
+  platformio_options:
+    # CDC_ON_BOOT enables early access to serial console;
+    # this way it can print all the core dumps etc.
+    build_flags:
+      - "-D ARDUINO_USB_CDC_ON_BOOT=1"
+      - "-D BOARD_HAS_PSRAM=1"
+    board_build.mcu: esp32s3
+    board_build.f_cpu: 240000000L
+    board_build.name: "LilyGO T-Embed ESP32-S3"
+    board_build.upload.flash_size: "16MB"
+    board_build.upload.maximum_size: 16777216
+    board_build.vendor: "LilyGO"
+    build_type: debug
+    debug_speed: 12000
+    debug_tool: esp-builtin
+    debug_init_break: tbreak setup
+    # upload_protocol: esp-builtin
+    upload_protocol: esptool
+    monitor_filters: esp32_exception_decoder
+  on_boot:
+    priority: 600
+    then:
+      - switch.turn_on: power_on
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    version: recommended
+
+psram:
+
+logger:
+
+api:
+  id: ha_api
+
+ota:
+  platform: esphome
+  password: !secret ota_password
+
+wifi:
+  ap: {}
+captive_portal:
+improv_serial:
+
+time:
+  - platform: homeassistant
+    id: home_time
+    timezone: CET-1CEST,M3.5.0,M10.5.0/3
+
+globals:
+  - id: tag_active
+    type: bool
+    initial_value: "false"
+  - id: light_brightness
+    type: float
+    initial_value: "0.0"
+  - id: light_red
+    type: float
+    initial_value: "0.0"
+  - id: light_green
+    type: float
+    initial_value: "0.0"
+  - id: light_blue
+    type: float
+    initial_value: "0.0"
+  - id: light_effect
+    type: std::string
+    initial_value: '"None"'
+  - id: menu_state
+    type: int
+    initial_value: '0'
+
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2811
+    pin: GPIO38
+    num_leds: ${led_count}
+    name: ${friendly_name}
+    id: internal_light
+    rgb_order: GRB
+    use_psram: false
+    use_dma: true
+    max_refresh_rate: 16ms
+    effects:
+      - addressable_rainbow:
+          name: Rainbow
+      - pulse:
+          transition_length: 1s
+      - lambda:
+          name: "Notification"
+          update_interval: 1s
+          lambda: |-
+            static int state = 0;
+            // https://esphome.io/api/classesphome_1_1light_1_1_light_call
+            auto call = id(internal_light)->make_call();
+            if (state == 0) {
+              // Dim the light
+              call.set_state(true);
+              call.set_brightness(1);
+              call.set_transition_length(1000);
+            } else if (state == 1) {
+              call.set_brightness(0.5);
+              call.set_transition_length(1000);
+            }
+            call.perform();
+            ++state %= 2;
+
+script:
+  - id: store_light_state
+    then:
+      - lambda: |-
+          id(internal_light).current_values_as_brightness(
+            &id(light_brightness)
+          );
+          id(internal_light).current_values_as_rgb(
+            &id(light_red), &id(light_green), &id(light_blue)
+          );
+          id(light_effect) = id(internal_light).get_effect_name();
+          ESP_LOGD(
+            "light_store",
+            "Storing light settings: brightness: %.1f, RGB: %.1f %.1f %.1f, effect: %s",
+            id(light_brightness),
+            id(light_red),
+            id(light_green),
+            id(light_blue),
+            id(light_effect).c_str()
+          );
+
+  - id: restore_light_state
+    then:
+      - lambda: |-
+          ESP_LOGD(
+            "light_restore",
+            "Re-storing light settings: brightness: %.1f, RGB: %.1f %.1f %.1f, effect: %s",
+            id(light_brightness),
+            id(light_red),
+            id(light_green),
+            id(light_blue),
+            id(light_effect).c_str()
+          );
+          // Change the effect first to make sure that whatever effect was there previously
+          // is now disabled. If we're restoring to a disabled light, previous effect
+          // would not get disabled because ESPHome can't set effect/flash when
+          // turning off the light.
+          auto call_effect = id(internal_light).turn_on();
+          call_effect.set_effect(id(light_effect));
+          call_effect.perform();
+
+          auto call = id(internal_light).turn_on();
+          call.set_brightness(id(light_brightness));
+          call.set_rgb(
+            id(light_red),
+            id(light_green),
+            id(light_blue)
+          );
+          call.perform();
+
+  - id: notify_error
+    then:
+      - light.control:
+          id: internal_light
+          effect: "Notification"
+          blue: 0%
+          red: 100%
+          green: 0%
+          state: on
+      - delay: 4s
+
+# Lilygo T-Embed peripheral power and backlight switches
+switch:
+  - platform: gpio
+    pin:
+      number: GPIO46
+      mode:
+        output: True
+    name: "Power On"
+    id: power_on
+
+# RC522 RFID module connections
+# RFID-RC522   <->  Wemos D1 Mini
+# SDA (SS)     <->  GPIO16
+# SCK          <->  GPIO22
+# MOSI         <->  GPIO21
+# MISO         <->  GPIO17
+# IRQ          <->  -
+# GND
+# RST          <->  GPIO04
+# VCC
+# spi:
+#   id: rfid_spi
+#   clk_pin: GPIO22
+#   mosi_pin: GPIO21
+#   miso_pin: GPIO17
+i2c:
+  id: i2c_bus0
+  scl: GPIO08
+  sda: GPIO18
+  scan: True
+
+pn532_i2c:
+  update_interval: 1s
+  i2c_id: i2c_bus0
+  on_tag_removed:
+    then:
+      - globals.set: 
+          id: tag_active
+          value: 'false'
+      - logger.log:
+          format: "Tag removed: %i"
+          args: [ 'id(tag_active)' ]
+          
+  on_tag:
+    if:
+      condition:
+        not:
+          api.connected:
+      then:
+        - script.execute: store_light_state
+        - script.execute: notify_error
+        - script.execute: restore_light_state
+      else:
+        if:
+          condition: 
+          # Only proceed if there is no active tag
+            - lambda: |-
+                return !id(tag_active);
+          then:
+            - globals.set: 
+                id: tag_active
+                value: 'true'
+            - logger.log:
+                format: "Tag found: %i"
+                args: [ 'id(tag_active)' ]
+            - script.execute: store_light_state
+            - homeassistant.tag_scanned: !lambda "return x;"
+            - light.turn_on:
+                id: internal_light
+                effect: "Notification"
+                brightness: 50%
+                red: 50%
+                green: 5%
+                blue: 92%
+            - delay: 2s
+            - script.execute: restore_light_state
+          else:
+          - logger.log:
+              format: "Tag active: %i"
+              args: [ 'id(tag_active)' ]
+
+#
+# Display
+#
+spi:
+  id: display_spi
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+
+font:
+  - file: "gfonts://Teko"
+    id: disp_font
+    size: 96
+  - file: "gfonts://Material+Symbols+Outlined"
+    id: icons_20
+    size: 20
+    glyphs: [
+      "\U0000e63e", # wifi
+      "\U0000e648", # wifi-off
+      "\U0000e2bf", # cloud-done
+      "\U0000e2c1", # cloud-off
+      "\U0000e037", # play-arrow
+      "\U0000e034", # pause
+      ]
+  - file: "gfonts://Material+Symbols+Outlined"
+    id: icons_36
+    size: 36
+    glyphs: [
+      "\U0000e63e", # wifi
+      "\U0000e648", # wifi-off
+      "\U0000e2bf", # cloud-done
+      "\U0000e2c1", # cloud-off
+      "\U0000e037", # play-arrow
+      "\U0000e034", # pause
+      ]
+
+
+display:
+  - platform: st7789v
+    model: LILYGO_T-EMBED_170X320
+    cs_pin: GPIO10
+    dc_pin: GPIO13
+    backlight_pin: GPIO15
+    reset_pin: GPIO09
+    update_interval: 10s
+    auto_clear_enabled: true
+    id: disp
+    spi_id: display_spi
+    lambda: |-
+      it.strftime(80, 16, id(disp_font), "%H:%M", id(home_time).now());
+      if (id(ha_api)->is_connected()) {
+        it.printf(0, 8, id(icons_20), "\U0000e2bf");
+      } else {
+        it.printf(0, 8, id(icons_20), "\U0000e2c1");
+      }
+#
+# Menu
+#
+binary_sensor:
+  - platform: template
+    name: Tag Active
+    lambda: |-
+      return id(tag_active);
+  - platform: gpio
+    id: light_btn
+    pin:
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+    on_click:
+    - min_length: 50ms
+      max_length: 400ms
+      then:
+      # On short press light toggles between pre-defined states:
+      # - Off
+      # - 40% brightness
+      # - 70% brightness
+      # - 100% brightness
+      # - Rainbow
+      - lambda: |-
+          id(menu_state) = (id(menu_state) + 1) % 5;
+
+          auto clear_effect = id(internal_light).turn_on();
+          clear_effect.set_effect("None");
+          clear_effect.perform();
+
+          auto call = id(internal_light).turn_on();
+          call.set_rgb(1.0, 1.0, 1.0);
+
+          switch (id(menu_state)) {
+            case 0: call.set_brightness(0.0); break;
+            case 1: call.set_brightness(0.4); break;
+            case 2: call.set_brightness(0.7); break;
+            case 3: call.set_brightness(1.0); break;
+            case 4: call.set_effect("Rainbow"); break;
+          }
+          call.perform();
+    - min_length: 500ms
+      max_length: 5000ms
+      then:
+      - light.toggle: internal_light
+
+button:
+  - platform: restart
+    name: "${friendly_name} Restart"
