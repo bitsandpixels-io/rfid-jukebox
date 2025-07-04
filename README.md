@@ -3,6 +3,13 @@
 This is a variation on the topic of RFID Jukebox: scan an RFID tag or card,
 and the music starts playing. Few bells and whistles are added, though.
 
+> [!TIP]
+> Read more in the blog posts:
+> - [RFID Jukebox: The Story](https://bitsandpixels.io/posts/rfid-jukebox-story/)
+> - [RFID Jukebox: The Build](https://bitsandpixels.io/posts/rfid-jukebox-build)
+> - [RFID Jukebox: The FIrmware](https://bitsandpixels.io/posts/rfid-jukebox-esphome-firmware)
+> - [RFID Jukebox: Home Assistant Automation](https://bitsandpixels.io/posts/rfid-jukebox-automation)
+
 If you look for "RFID jukebox" on the internet, you'll likely find dozens of
 projects and builds, starting with the one on the [Home Assistant's blog](https://www.home-assistant.io/integrations/tag/#building-an-rfid-jukebox).
 The idea is appealing, especially if this box is meant for a kid to use with
@@ -209,3 +216,10 @@ from on to off, calls Home Assistant service to stop the playback.
 And that's it! Check out the other posts in the series to read more about how
 the ESPHome firmware is built or how exactly does the automation work. Or just
 download the files and build your own.
+
+> [!TIP]
+> If you'd like to read more about this project, visit the blog:
+> - [RFID Jukebox: The Story](https://bitsandpixels.io/posts/rfid-jukebox-story/)
+> - [RFID Jukebox: The Build](https://bitsandpixels.io/posts/rfid-jukebox-build)
+> - [RFID Jukebox: The FIrmware](https://bitsandpixels.io/posts/rfid-jukebox-esphome-firmware)
+> - [RFID Jukebox: Home Assistant Automation](https://bitsandpixels.io/posts/rfid-jukebox-automation)
