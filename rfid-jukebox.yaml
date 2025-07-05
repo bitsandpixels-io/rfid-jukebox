@@ -31,7 +31,7 @@ esphome:
   name: "${name}"
   project:
     name: "bitsandpixels.rfid-jukebox"
-    version: "1.0.1_t-embed"
+    version: "1.0.2_t-embed"
   platformio_options:
     # CDC_ON_BOOT enables early access to serial console;
     # this way it can print all the core dumps etc.
@@ -238,14 +238,13 @@ pn532_i2c:
   update_interval: 1s
   i2c_id: i2c_bus0
   on_tag_removed:
-    then:
-      - globals.set: 
-          id: tag_active
-          value: 'false'
-      - logger.log:
-          format: "Tag removed: %i"
-          args: [ 'id(tag_active)' ]
-          
+    - homeassistant.event:
+        event: esphome.tag_removed
+        data:
+          tag: !lambda 'return x;'
+    - logger.log:
+        format: "Tag removed: %i"
+        args: [ 'id(tag_active)' ]
   on_tag:
     if:
       condition:
@@ -342,10 +341,6 @@ display:
 # Menu
 #
 binary_sensor:
-  - platform: template
-    name: Tag Active
-    lambda: |-
-      return id(tag_active);
   - platform: gpio
     id: light_btn
     pin:
